@@ -1,0 +1,100 @@
+using System;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
+
+public class EmailService
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _tokenEndpoint;
+    private readonly string _emailEndpoint;
+    private string _token;
+
+    public EmailService(string tokenEndpoint, string emailEndpoint)
+    {
+        _httpClient = new HttpClient();
+        _tokenEndpoint = tokenEndpoint;
+        _emailEndpoint = emailEndpoint;
+    }
+
+    public async Task<string> GetTokenAsync(string clientId, string clientSecret)
+    {
+        var requestBody = new
+        {
+            client_id = clientId,
+            client_secret = clientSecret,
+            grant_type = "client_credentials"
+        };
+
+        var content = new StringContent(JsonConvert.SerializeObject(requestBody), Encoding.UTF8, "application/json");
+        var response = await _httpClient.PostAsync(_tokenEndpoint, content);
+
+        if (response.IsSuccessStatusCode)
+        {
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var tokenResponse = JsonConvert.DeserializeObject<TokenResponse>(responseContent);
+            _token = tokenResponse.AccessToken;
+            return _token;
+        }
+
+        throw new Exception("Failed to retrieve token");
+    }
+
+    public async Task SendEmailAsync(string to, string subject, string body)
+    {
+        if (string.IsNullOrEmpty(_token))
+        {
+            throw new InvalidOperationException("Token is not available. Call GetTokenAsync first.");
+        }
+
+        var emailRequest = new
+        {
+            to,
+            subject,
+            body
+        };
+
+        var content = new StringContent(JsonConvert.SerializeObject(emailRequest), Encoding.UTF8, "application/json");
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+        var response = await _httpClient.PostAsync(_emailEndpoint, content);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Exception("Failed to send email");
+        }
+    }
+
+    private class TokenResponse
+    {
+        [JsonProperty("access_token")]
+        public string AccessToken { get; set; }
+    }
+}
+
+
+
+public class Program
+{
+    public static async Task Main(string[] args)
+    {
+        var tokenEndpoint = "https://api.example.com/token";
+        var emailEndpoint = "https://api.example.com/send-email";
+        var clientId = "your-client-id";
+        var clientSecret = "your-client-secret";
+
+        var emailService = new EmailService(tokenEndpoint, emailEndpoint);
+
+        try
+        {
+            await emailService.GetTokenAsync(clientId, clientSecret);
+            await emailService.SendEmailAsync("recipient@example.com", "Test Subject", "Test Body");
+            Console.WriteLine("Email sent successfully.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"An error occurred: {ex.Message}");
+        }
+    }
+}
